@@ -3,7 +3,7 @@ const debug = require('debug')('timify:controllers:resources')
 const { ObjectID } = require('mongodb')
 const v = require('../services/index').validator;
 const createAndUpdateResources = async (req, res, next) => {
-    
+
     const updateAllCollection = async (model, docs) => {
         await model.collection.remove();
         const bulk = model.collection.initializeUnorderedBulkOp();
