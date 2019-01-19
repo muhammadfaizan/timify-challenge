@@ -5,6 +5,38 @@ const v = require('../services/index').validator;
 const { TIME_FORMAT, DATE_FORMAT, DATE_TIME_FORMAT } = require('../services').constants;
 
 const cvrtMoment2Index = (momentIndex) => (momentIndex) % 7;
+const findMiddleTime = (referenceTime, subjectTime) => {
+    // case 1: subject begin time is in interval of reference time
+    // case 2: subject end time is in interval of reference time
+    // case 3: subject time overlaps from outer bounds to reference time
+    // case 4: subject is limited to reference time
+    // case 5: subject time lies on reference time
+    // case 6: subject time never overlaps reference time
+
+
+    if (referenceTime.begin === subjectTime.begin) {
+        if (referenceTime.end === subjectTime.end ||
+            ((referenceTime.begin < subjectTime.end) && (referenceTime.end > subjectTime.end))) {
+            return Object.assign({}, referenceTime);
+        } else if (referenceTime.end > subjectTime.end) {
+            return {
+                begin: referenceTime.begin,
+                end: subjectTime.end
+            }
+        }
+    } else if (referenceTime.begin > subjectTime.begin) {
+        if (referenceTime.end === subjectTime.end || referenceTime.end < subjectTime.end) {
+            return Object.assign({}, referenceTime);
+        } else if (referenceTime.end > subjectTime.end) {
+            return {
+                begin: referenceTime.begin,
+                end: subjectTime.end
+            }
+        }
+    }
+
+
+}
 const findAvailability = async (req, res, next) => {
     try {
         const validator = v.object({
@@ -74,6 +106,19 @@ const findAvailability = async (req, res, next) => {
         }
         availableDoctors = setAvailableTime(availableDoctors);
         availableRooms = setAvailableTime(availableRooms);
+        let doctorAndRoomTimes = availableRooms.reduce((room) => {
+            return availableDoctors.map(doctor => {
+                let DnR = {
+                    room: room._id,
+                    doctor: doctor._id,
+                    times: []
+                };
+                doctor.avbTimes.forEach(time => {
+
+                })
+                return DnR;
+            })
+        }, [])
 
         // once data is ready and has all available time listed for doctor and room.
         // check for consultations on that day and modify that day room accordingly.
