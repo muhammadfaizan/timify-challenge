@@ -2,17 +2,15 @@ const validator = require('validator');
 // const R = require('ramda');
 const debug = require('debug')('zcare:utilities:validate');
 const moment = require('moment');
+const { TIME_FORMAT, DATE_FORMAT, DATE_TIME_FORMAT } = require('./constants');
 const Validate = exports;
-const TIME_FORMAT = 'HH:mm'
-const DATE_FORMAT = 'YYYY-MM-DD';
-const DATE_TIME_FORMAT = `${DATE_FORMAT} ${TIME_FORMAT}`;
 function InvalidValueError(message) {
   this.message = message;
   this.name = 'InvalidValueError';
   Error.captureStackTrace(this, InvalidValueError);
 }
 
-InvalidValueError.prepend = function(message, error, key) {
+InvalidValueError.prepend = function (message, error, key) {
   if (error instanceof InvalidValueError) {
     return new InvalidValueError(message + ': ' + error.message);
   }
@@ -21,33 +19,33 @@ InvalidValueError.prepend = function(message, error, key) {
 
 Validate.InvalidValueError = InvalidValueError;
 
-Validate.acceptAll = function(value) {
+Validate.acceptAll = function (value) {
   return value;
 };
 
-Validate.optional = function(validator) {
-  return function(value) {
+Validate.optional = function (validator) {
+  return function (value) {
     return (value === undefined || value === null) ? value : validator(value);
   };
 };
 
-Validate.that = function(predicate, message) {
-  return function(value) {
+Validate.that = function (predicate, message) {
+  return function (value) {
     if (predicate(value)) return value;
     throw new InvalidValueError(message);
   };
 };
 
-Validate.number = Validate.that(function(value) {
+Validate.number = Validate.that(function (value) {
   return typeof value === 'number';
 }, 'not a number');
 
-Validate.string = Validate.that(function(value) {
+Validate.string = Validate.that(function (value) {
   return typeof value === 'string';
 }, 'not a string');
 
-Validate.object = function(propertyValidators) {
-  return function(object) {
+Validate.object = function (propertyValidators) {
+  return function (object) {
     let result = {};
     let key;
     let valid;
@@ -58,16 +56,16 @@ Validate.object = function(propertyValidators) {
     for (key in propertyValidators) {
       let validator = propertyValidators[key];
       try {
-          valid = validator(object[key]);
+        valid = validator(object[key]);
       } catch (error) {
         if (key in object) {
-            throw InvalidValueError.prepend('in property "' + key + '"', error);
+          throw InvalidValueError.prepend('in property "' + key + '"', error);
         } else {
-            throw new InvalidValueError('missing property "' + key + '"');
+          throw new InvalidValueError('missing property "' + key + '"');
         }
       }
       if (key in object && valid !== undefined) {
-          result[key] = valid;
+        result[key] = valid;
       }
     }
 
@@ -82,8 +80,8 @@ Validate.object = function(propertyValidators) {
   };
 };
 
-Validate.array = function(validator) {
-  return function(array) {
+Validate.array = function (validator) {
+  return function (array) {
     let result = [];
 
     if (Object.prototype.toString.call(array) !== '[object Array]') {
@@ -102,26 +100,26 @@ Validate.array = function(validator) {
   };
 };
 
-Validate.oneOf = function(names) {
+Validate.oneOf = function (names) {
   let myObject = {};
   let quotedNames = [];
-  names.forEach(function(name) {
+  names.forEach(function (name) {
     myObject[name] = true;
     quotedNames.push('"' + name + '"');
   });
 
-  return function(value) {
+  return function (value) {
     if (myObject[value]) return value;
     throw new InvalidValueError('not one of ' + quotedNames.join(', '));
   };
 };
 
-Validate.mutuallyExclusiveProperties = function(names) {
-  return function(value) {
+Validate.mutuallyExclusiveProperties = function (names) {
+  return function (value) {
     if (!value) return value;
 
     let present = [];
-    names.forEach(function(name) {
+    names.forEach(function (name) {
       if (name in value) {
         present.push('"' + name + '"');
       }
@@ -129,20 +127,20 @@ Validate.mutuallyExclusiveProperties = function(names) {
 
     if (present.length > 1) {
       throw new InvalidValueError(
-          'cannot specify properties '
-          + present.slice(0, -1).join(', ')
-          + ' and '
-          + present.slice(-1)
-          + ' together');
+        'cannot specify properties '
+        + present.slice(0, -1).join(', ')
+        + ' and '
+        + present.slice(-1)
+        + ' together');
     }
 
     return value;
   };
 };
 
-Validate.compose = function(validators) {
-  return function(value) {
-    validators.forEach(function(validate) {
+Validate.compose = function (validators) {
+  return function (value) {
+    validators.forEach(function (validate) {
       value = validate(value);
     });
     return value;
@@ -150,10 +148,10 @@ Validate.compose = function(validators) {
 };
 
 Validate.boolean = Validate.compose([
-  Validate.that(function(value) {
+  Validate.that(function (value) {
     return typeof value === 'boolean';
   }, 'not a boolean'),
-  function(value) {
+  function (value) {
     // In each API, boolean fields default to false, and the presence of
     // a querystring value indicates true, so we omit the value if
     // explicitly set to false.
@@ -162,21 +160,21 @@ Validate.boolean = Validate.compose([
 ]);
 
 Validate.atLeastOneOfProperties = (names) => {
-  return function(value) {
-      if (!value) return value;
+  return function (value) {
+    if (!value) return value;
 
-      let present = [];
-      names.forEach(function(name) {
-          if (name in value) {
-              present.push('"' + name + '"');
-          }
-      });
-
-      if (present.length == 0) {
-          throw new InvalidValueError(`specify at least one of properties "${names.slice(0, -1).join(', "')}" and "${names.slice(-1)}"`)
+    let present = [];
+    names.forEach(function (name) {
+      if (name in value) {
+        present.push('"' + name + '"');
       }
+    });
 
-      return value;
+    if (present.length == 0) {
+      throw new InvalidValueError(`specify at least one of properties "${names.slice(0, -1).join(', "')}" and "${names.slice(-1)}"`)
+    }
+
+    return value;
   };
 };
 
@@ -188,18 +186,18 @@ Validate.uppercase = Validate.that(value => validator.isUppercase(value), 'not a
 
 Validate.numeric = Validate.that(value => validator.isNumeric(value), 'not numeric');
 
-Validate.email = Validate.that(value =>  {
+Validate.email = Validate.that(value => {
   return validator.isEmail(value);
 }, 'not an email');
 
 Validate.phone = (format) => (value => validator.isMobilePhone(value, format || process.env.MOBILE_FORMAT));
 
-Validate.emailNormalized =  Validate.compose([
-  Validate.email, 
+Validate.emailNormalized = Validate.compose([
+  Validate.email,
   Validate.that(value => validator.normalizeEmail(value) === value, 'is not normalized email')
 ]);
 
-Validate.isNotEmpty =  Validate.that(value => !validator.isEmpty(value), 'is empty')
+Validate.isNotEmpty = Validate.that(value => !validator.isEmpty(value), 'is empty')
 
 Validate.dateString = Validate.compose([
   Validate.string,
@@ -233,7 +231,7 @@ Validate.dateOfBirth = Validate.compose([
   Validate.that(payload => {
     const dateOfBirthMoment = moment([
       payload.year,
-      payload.month-1, //because moment month is 0 index based
+      payload.month - 1, //because moment month is 0 index based
       payload.day,
     ]);
     return dateOfBirthMoment.isValid();
