@@ -1,4 +1,4 @@
-const { Room, Doctor, db } = require('../db/index');
+const { Room, Doctor, Consultation, db } = require('../db/index');
 const debug = require('debug')('timify:controllers:resources')
 const { ObjectID } = require('mongodb')
 const v = require('../services/index').validator;
@@ -35,12 +35,12 @@ const createAndUpdateResources = async (req, res, next) => {
             doctors: roomAndDoctorValidator
         })
         validator(req.body);
-        await db.db.dropDatabase();
-        let roomsData = await Promise.all([
-            updateAllCollection(Room,req.body.rooms),
-            updateAllCollection(Doctor, req.body.doctors)
-        ]);
-        
+        await Consultation.remove({});
+        await Room.remove({});
+        await Doctor.remove({});
+        await updateAllCollection(Room, req.body.rooms);
+        await updateAllCollection(Doctor, req.body.doctors)
+
         res.send({
             success: true
         });
@@ -50,7 +50,21 @@ const createAndUpdateResources = async (req, res, next) => {
     }
 }
 
-const getResources = (req, res, next) => {
+const getResources = async (req, res, next) => {
+
+    try {
+        // I first combined them both in promise.all
+        // but later figured that it was making the request slower
+        // so I separated them and now this is improved by 80%
+        let rooms = await Room.find({});
+        let doctors = await Doctor.find({});
+        res.send({
+            rooms,
+            doctors
+        });
+    } catch (err) {
+        next(err);
+    }
 
 }
 

@@ -1,21 +1,11 @@
 const express = require('express');
 const router = express.Router();
-const { resourceController } = require('../controllers/index');
+const { resourceController, consultationController } = require('../controllers/index');
 
-router.get('/', function(req, res, next) {
-  res.render('index', { title: 'Express' });
-});
-/* GET home page. */
+router.get('/resources', resourceController.getResources);
 router.post('/resources', resourceController.createAndUpdateResources);
-/* GET home page. */
-/* GET home page. */
-router.get('/', function(req, res, next) {
-  res.render('index', { title: 'Express' });
-});
-/* GET home page. */
-router.get('/', function(req, res, next) {
-  res.render('index', { title: 'Express' });
-});
-
+router.get('/availability', consultationController.findAvailability);
+router.get('/consultations', consultationController.getAllConsultations);
+router.get('/consultations', consultationController.createConsultation);
 
 module.exports = router;
