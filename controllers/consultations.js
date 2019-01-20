@@ -1,9 +1,17 @@
 const { Room, Doctor, Consultation } = require('../db/index');
 const debug = require('debug')('timify:controllers:consultations')
-const moment = require('moment').utc;
+let m = require('moment');
+const { extendMoment } = require('moment-range');
+const mongoose = require('mongoose');
+const RK = mongoose.Types.ObjectId;
 const v = require('../services/index').validator;
-const { TIME_FORMAT, DATE_FORMAT, DATE_TIME_FORMAT } = require('../services').constants;
 const R = require('ramda');
+
+const { TIME_FORMAT, DATE_FORMAT, DATE_TIME_FORMAT } = require('../services').constants;
+m = extendMoment(m);
+moment = m.utc
+
+
 const cvrtMoment2Index = (momentIndex) => (momentIndex) % 7;
 const findMiddleTime = (referenceTime, subjectTime) => {
     // case 1: subject begin time is in interval of reference time
@@ -155,43 +163,6 @@ const findAvailability = async (req, res, next) => {
         }
         availableDoctors = setAvailableTime(availableDoctors);
         availableRooms = setAvailableTime(availableRooms);
-        // eradicate duplicate non-required room time;
-        /*
-        let findOverLappingConsulations = (key, id, time) => {
-            let query = {
-                [key]: id,
-                $or: [
-                    {
-                        $and: [
-                            { begin: { $gte: time.begin } },
-                            { begin: { $lt: time.end } },
-                        ],
-                    }, {
-                        $and: [
-                            { end: { $gt: time.begin } },
-                            { end: { $lte: time.end } },
-                        ],
-                    }, {
-                        begin: time.startTime,
-                        end: time.endTime,
-                    }, {
-                        begin: { $lt: time.begin },
-                        end: { $gt: time.end },
-                    }
-                ],
-            };
-            Consultation.find(query)
-        }
-        let reduceDoctorData = async (doctor) => {
-            let d = {
-                _id: doctor._id
-            };
-            doctor.consulations = await Promise.all(doctor.availableTimes.map(dTime => {
-                return findOverLappingConsulations('doctor', d._id, dTime);
-            }))
-
-        }
-        */
         let doctorAndRoomTimes = availableRooms.reduce((prev, currentRoom) => {
             return availableDoctors.map(doctor => {
                 let DnR = {
@@ -223,8 +194,8 @@ const findAvailability = async (req, res, next) => {
                         $and: [
                             {
                                 $or: [
-                                    { doctor: DnR.doctor },
-                                    { room: DnR.room }
+                                    { doctorId: DnR.doctor },
+                                    { roomId: DnR.room }
                                 ]
                             }, {
                                 $or: [
@@ -272,14 +243,35 @@ const findAvailability = async (req, res, next) => {
             DnR.consulations = await Promise.all(consultationQueries.map(q => Consultation.find(q, 'begin end')))
             return DnR;
         }));
+        let timeSeparator = (time, consultations) => {
+            let timeRanges = [m.range(time.begin, time.end)];
+            consultations.forEach(con => {
+                timeRanges.forEach((t, i) => {
+                    let ranges = t.subtract(m.range(con.begin, con.end));
+                    if (ranges[0] !== null) {
+                        timeRanges.splice(i, 1, ...ranges)
+                    }
+                })
 
+            })
+            return timeRanges.map(t => {
+                return {
+                    begin: t.start.utc().toDate(),
+                    end: t.end.utc().toDate()
+                }
+            })
+
+        }
+        doctorAndRoomTimes.forEach(DnR => {
+            DnR.times.forEach((avbTime, i) => {
+                DnR.finalTime = timeSeparator(avbTime, DnR.consulations[i]);
+            });
+        })
         // now everytime has a consultation array.
 
 
 
         res.send({
-            availableRooms,
-            availableDoctors,
             doctorAndRoomTimes
         });
     } catch (err) {
@@ -290,11 +282,13 @@ const findAvailability = async (req, res, next) => {
 const createConsultation = async (req, res, next) => {
     try {
         let payload = [].concat(req.body);
-        payload.forEach(c => {
+        payload = payload.map(c => {
             c.begin = moment(c.begin, DATE_TIME_FORMAT).toDate();
             c.end = moment(c.end, DATE_TIME_FORMAT).toDate();
+            return new Consultation(c);
         })
-        let r = await Consultation.collection.insertMany(payload);
+        let r = await Promise.all(payload.map(d => d.save()))
+        // Consultation.collection.insertMany(payload);
         // let r = await Consultation.remove({});
         res.send(r);
     } catch (err) {

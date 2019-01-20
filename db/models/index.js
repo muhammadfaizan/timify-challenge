@@ -4,5 +4,5 @@ const mongoose = require('mongoose');
 module.exports = {
     Room: mongoose.model('Room', roomAndDoctorSchema),
     Doctor: mongoose.model('Doctor', roomAndDoctorSchema),
-    Consultation: mongoose.model('Blog', consultationSchema)
+    Consultation: mongoose.model('Consultation', consultationSchema)
 }
