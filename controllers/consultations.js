@@ -119,22 +119,34 @@ const findAvailability = async (req, res, next) => {
         availableRooms = availableRooms.map(o => o.toObject());
         let setAvailableTime = (docSet) => {
             return docSet.map(doc => {
-                if (!doc.avbTimes) {
-                    doc.avbTimes = [];
+                if (!doc.availableTimes) {
+                    doc.availableTimes = [];
                 }
                 let docItrtvDate = mStartDate.clone();
                 // iterating over days to create exact same days for each day in interval
-                while (docItrtvDate < mEndDate) {
+                while (docItrtvDate <= mEndDate) {
 
                     let dayIndex = cvrtMoment2Index(docItrtvDate.weekday());
 
                     if (!doc.times[dayIndex]) {
-                        doc.avbTimes.push(null);
+                        doc.availableTimes.push(null);
                     } else {
-                        doc.avbTimes.push({
-                            begin: moment(`${docItrtvDate.format(DATE_FORMAT)} ${doc.times[dayIndex].begin}`, DATE_TIME_FORMAT).toDate(),
-                            end: moment(`${docItrtvDate.format(DATE_FORMAT)} ${doc.times[dayIndex].end}`, DATE_TIME_FORMAT).toDate()
-                        })
+                        let begin = moment(`${docItrtvDate.format(DATE_FORMAT)} ${doc.times[dayIndex].begin}`, DATE_TIME_FORMAT).toDate();
+                        let end = moment(`${docItrtvDate.format(DATE_FORMAT)} ${doc.times[dayIndex].end}`, DATE_TIME_FORMAT).toDate();
+                        if (mStartDate.isSameOrAfter(end)) {
+                            doc.availableTimes.push(null);
+                        } else if (mEndDate.isSameOrBefore(end)) {
+                            doc.availableTimes.push(null);
+                        } else if (mStartDate.isAfter(begin)) {
+                            begin = mStartDate.toDate();
+                        } else if (mEndDate.isBefore(end)) {
+                            end = mEndDate.toDate();
+                        } else {
+                            doc.availableTimes.push({
+                                begin,
+                                end
+                            })
+                        }
                     }
                     docItrtvDate.add(1, 'day');
                 }
@@ -174,7 +186,7 @@ const findAvailability = async (req, res, next) => {
             let d = {
                 _id: doctor._id
             };
-            doctor.consulations = await Promise.all(doctor.avbTimes.map(dTime => {
+            doctor.consulations = await Promise.all(doctor.availableTimes.map(dTime => {
                 return findOverLappingConsulations('doctor', d._id, dTime);
             }))
 
@@ -187,86 +199,116 @@ const findAvailability = async (req, res, next) => {
                     doctor: doctor._id,
                     times: []
                 };
-                doctor.avbTimes.forEach(doctorTime => {
-                    currentRoom.avbTimes.forEach(roomTime => {
+                doctor.availableTimes.forEach(doctorTime => {
+                    currentRoom.availableTimes.forEach(roomTime => {
                         let commonTimeSpan = findMiddleTime(roomTime, doctorTime);
                         if (commonTimeSpan) {
                             DnR.times.push(commonTimeSpan);
                         }
                     });
                 });
-                prev.push(DnR);
-                return prev;
+                return DnR;
             })
         }, [])
 
         // once data is ready and has all available time listed for doctor and room.
         // check for consultations on that day and modify that day room accordingly.
 
-        let consultationQueries = []
-        doctorAndRoomTimes.forEach(DnR => {
-            // DnR.times.forEach(time => {
-            //     consultationQueries.push({
-            //         $and: [
-            //             {
-            //                 $or: [
-            //                     { doctor: DnR.doctor },
-            //                     { room: DnR.room }
-            //                 ]
-            //             }, {
-            //                 $or: [
-            //                     {
-            //                         $and: [
-            //                             { begin: { $gte: time.begin } },
-            //                             { begin: { $lt: time.end } },
-            //                         ],
-            //                     }, {
-            //                         $and: [
-            //                             {
-            //                                 $or: [
-            //                                     { doctor: DnR.doctor },
-            //                                     { room: DnR.room }
-            //                                 ]
-            //                             },
-            //                             { end: { $gt: time.begin } },
-            //                             { end: { $lte: time.end } },
-            //                         ],
-            //                     }, {
-            //                         $or: [
-            //                             { doctor: DnR.doctor },
-            //                             { room: DnR.room }
-            //                         ],
-            //                         begin: time.startTime,
-            //                         end: time.endTime,
-            //                     }, {
-            //                         $or: [
-            //                             { doctor: DnR.doctor },
-            //                             { room: DnR.room }
-            //                         ],
-            //                         begin: { $lt: time.begin },
-            //                         end: { $gt: time.end },
-            //                     }
-            //                 ],
-            //             }
-            //         ],
+        doctorAndRoomTimes = await Promise.all(doctorAndRoomTimes.map(async (DnR) => {
+            let consultationQueries = [];
+            debug(DnR);
+            try {
+                DnR.times.forEach(time => {
+                    consultationQueries.push({
+                        $and: [
+                            {
+                                $or: [
+                                    { doctor: DnR.doctor },
+                                    { room: DnR.room }
+                                ]
+                            }, {
+                                $or: [
+                                    {
+                                        $and: [
+                                            { begin: { $gte: time.begin } },
+                                            { begin: { $lt: time.end } },
+                                        ],
+                                    }, {
+                                        $and: [
+                                            {
+                                                $or: [
+                                                    { doctor: DnR.doctor },
+                                                    { room: DnR.room }
+                                                ]
+                                            },
+                                            { end: { $gt: time.begin } },
+                                            { end: { $lte: time.end } },
+                                        ],
+                                    }, {
+                                        $or: [
+                                            { doctor: DnR.doctor },
+                                            { room: DnR.room }
+                                        ],
+                                        begin: time.startTime,
+                                        end: time.endTime,
+                                    }, {
+                                        $or: [
+                                            { doctor: DnR.doctor },
+                                            { room: DnR.room }
+                                        ],
+                                        begin: { $lt: time.begin },
+                                        end: { $gt: time.end },
+                                    }
+                                ],
+                            }
+                        ],
 
-            //     })
-            // })
-        });
+                    })
+                })
+            } catch (err) {
+                debug(err);
+            }
+
+            DnR.consulations = await Promise.all(consultationQueries.map(q => Consultation.find(q, 'begin end')))
+            return DnR;
+        }));
+
+        // now everytime has a consultation array.
+
 
 
         res.send({
             availableRooms,
             availableDoctors,
-            // doctorAndRoomTimes
+            doctorAndRoomTimes
         });
+    } catch (err) {
+        next(err);
+    }
+}
+
+const createConsultation = async (req, res, next) => {
+    try {
+        let payload = [].concat(req.body);
+        payload.forEach(c => {
+            c.begin = moment(c.begin, DATE_TIME_FORMAT).toDate();
+            c.end = moment(c.end, DATE_TIME_FORMAT).toDate();
+        })
+        let r = await Consultation.collection.insertMany(payload);
+        // let r = await Consultation.remove({});
+        res.send(r);
     } catch (err) {
         next(err);
     }
 
 }
-const createConsultation = async (req, res, next) => { }
-const getAllConsultations = async (req, res, next) => { }
+const getAllConsultations = async (req, res, next) => {
+    try {
+        res.send(await Consultation.find({}));
+    } catch (err) {
+        next(err);
+    }
+}
 
 module.exports = {
     findAvailability,
