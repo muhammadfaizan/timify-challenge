@@ -88,7 +88,7 @@ const findAvailability = async (req, res, next) => {
         // debug(req.query);
         // validator(req.query);
         let payload = req.query;
-        debug(payload)
+        payload.duration = parseInt(payload.duration)
         let mStartDate = moment(payload.begin, DATE_TIME_FORMAT)
         let mEndDate = moment(payload.end, DATE_TIME_FORMAT)
         if (mStartDate > mEndDate) {
@@ -243,7 +243,7 @@ const findAvailability = async (req, res, next) => {
             DnR.consulations = await Promise.all(consultationQueries.map(q => Consultation.find(q, 'begin end')))
             return DnR;
         }));
-        let timeSeparator = (time, consultations) => {
+        let timeSeparator = (time, consultations, durationInMins) => {
             let timeRanges = [m.range(time.begin, time.end)];
             consultations.forEach(con => {
                 timeRanges.forEach((t, i) => {
@@ -254,17 +254,20 @@ const findAvailability = async (req, res, next) => {
                 })
 
             })
-            return timeRanges.map(t => {
-                return {
-                    begin: t.start.utc().toDate(),
-                    end: t.end.utc().toDate()
+            return timeRanges.reduce((prev, t) => {
+                if (moment(t.end).diff(t.start, 'minute') >= durationInMins) {
+                    prev.push({
+                        begin: t.start.utc().toDate(),
+                        end: t.end.subtract(durationInMins, 'minute').utc().toDate()
+                    });
                 }
-            })
+                return prev;
+            }, [])
 
         }
         doctorAndRoomTimes.forEach(DnR => {
             DnR.times.forEach((avbTime, i) => {
-                DnR.finalTime = timeSeparator(avbTime, DnR.consulations[i]);
+                DnR.finalTime = timeSeparator(avbTime, DnR.consulations[i], payload.duration);
             });
         })
         // now everytime has a consultation array.
@@ -287,9 +290,10 @@ const createConsultation = async (req, res, next) => {
             c.end = moment(c.end, DATE_TIME_FORMAT).toDate();
             return new Consultation(c);
         })
+        await Consultation.remove({});
+
         let r = await Promise.all(payload.map(d => d.save()))
         // Consultation.collection.insertMany(payload);
-        // let r = await Consultation.remove({});
         res.send(r);
     } catch (err) {
         next(err);
