@@ -1,6 +1,6 @@
 const { Room, Doctor, Consultation } = require('../db/index');
 const debug = require('debug')('timify:controllers:consultations')
-const moment = require('moment');
+const moment = require('moment').utc;
 const v = require('../services/index').validator;
 const { TIME_FORMAT, DATE_FORMAT, DATE_TIME_FORMAT } = require('../services').constants;
 
@@ -14,28 +14,60 @@ const findMiddleTime = (referenceTime, subjectTime) => {
     // case 6: subject time never overlaps reference time
 
 
-    if (referenceTime.begin === subjectTime.begin) {
-        if (referenceTime.end === subjectTime.end ||
-            ((referenceTime.begin < subjectTime.end) && (referenceTime.end > subjectTime.end))) {
-            return Object.assign({}, referenceTime);
-        } else if (referenceTime.end > subjectTime.end) {
-            return {
-                begin: referenceTime.begin,
-                end: subjectTime.end
-            }
+    if (!referenceTime || !subjectTime) {
+        debug('null case');
+        return null;
+    }
+    // case 8
+    if (moment(subjectTime.begin).isSameOrAfter(referenceTime.end) ||
+        moment(subjectTime.end).isSameOrBefore(referenceTime.begin)) {
+        debug('case 8');
+        return null
+    }
+    // case 2 & case 1
+    if (moment(referenceTime.begin).isSameOrBefore(subjectTime.begin) &&
+        moment(referenceTime.end).isSameOrAfter(subjectTime.end)) {
+        debug('case 1 & 2')
+        return {
+            begin: new Date(subjectTime.begin),
+            end: new Date(subjectTime.end)
+        };
+    }
+    // case 3 & 9
+    if (moment(referenceTime.begin).isSame(subjectTime.begin)) {
+        debug('case 3 & 9')
+        return {
+            begin: new Date(referenceTime.begin),
+            end: (moment(referenceTime.end).isSameOrBefore(subjectTime.end)) ? new Date(referenceTime.end) : new Date(subjectTime.end)
         }
-    } else if (referenceTime.begin > subjectTime.begin) {
-        if (referenceTime.end === subjectTime.end || referenceTime.end < subjectTime.end) {
-            return Object.assign({}, referenceTime);
-        } else if (referenceTime.end > subjectTime.end) {
-            return {
-                begin: referenceTime.begin,
-                end: subjectTime.end
-            }
+    }
+    // case 4 and 10
+    if (moment(referenceTime.end).isSame(subjectTime.end)) {
+        debug('case 4 & 10');
+        return {
+            begin: (moment(referenceTime.begin).isAfter(subjectTime.begin)) ? new Date(referenceTime.begin) : new Date(subjectTime.begin),
+            end: new Date(referenceTime.end),
         }
     }
 
-
+    // case 6
+    if (moment(subjectTime.begin).isBetween(referenceTime.begin, referenceTime.end)) {
+        debug('case 6')
+        return {
+            begin: new Date(subjectTime.begin),
+            end: (moment(referenceTime.end).isSameOrBefore(subjectTime.end)) ? new Date(referenceTime.end) : new Date(subjectTime.end)
+        }
+    }
+    // case 7
+    if (moment(subjectTime.end).isBetween(referenceTime.begin, referenceTime.end)) {
+        debug('case 7')
+        return {
+            begin: (moment(referenceTime.begin).isAfter(subjectTime.begin)) ? new Date(referenceTime.begin) : new Date(subjectTime.begin),
+            end: new Date(subjectTime.end)
+        }
+    }
+    debug('no case');
+    return null;
 }
 const findAvailability = async (req, res, next) => {
     try {
@@ -106,17 +138,23 @@ const findAvailability = async (req, res, next) => {
         }
         availableDoctors = setAvailableTime(availableDoctors);
         availableRooms = setAvailableTime(availableRooms);
-        let doctorAndRoomTimes = availableRooms.reduce((room) => {
+        let doctorAndRoomTimes = availableRooms.reduce((prev, currentRoom) => {
             return availableDoctors.map(doctor => {
                 let DnR = {
-                    room: room._id,
+                    room: currentRoom._id,
                     doctor: doctor._id,
                     times: []
                 };
-                doctor.avbTimes.forEach(time => {
-
-                })
-                return DnR;
+                doctor.avbTimes.forEach(doctorTime => {
+                    currentRoom.avbTimes.forEach(roomTime => {
+                        let commonTimeSpan = findMiddleTime(roomTime, doctorTime);
+                        if (commonTimeSpan) {
+                            DnR.times.push(commonTimeSpan);
+                        }
+                    });
+                });
+                prev.push(DnR);
+                return prev;
             })
         }, [])
 
@@ -124,7 +162,8 @@ const findAvailability = async (req, res, next) => {
         // check for consultations on that day and modify that day room accordingly.
         res.send({
             availableRooms,
-            availableDoctors
+            availableDoctors,
+            doctorAndRoomTimes
         });
     } catch (err) {
         next(err);
