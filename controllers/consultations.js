@@ -79,14 +79,14 @@ const findMiddleTime = (referenceTime, subjectTime) => {
 }
 const findAvailability = async (req, res, next) => {
     try {
-        // const validator = v.object({
-        //     begin: v.dateString,
-        //     end: v.dateString,
-        //     duration: v.numeric
-        // });
+        const validator = v.object({
+            begin: v.dateTimeString,
+            end: v.dateTimeString,
+            duration: v.numeric
+        });
 
-        // debug(req.query);
-        // validator(req.query);
+        debug(req.query);
+        validator(req.query);
         let payload = req.query;
         payload.duration = parseInt(payload.duration)
         let mStartDate = moment(payload.begin, DATE_TIME_FORMAT)
@@ -272,11 +272,7 @@ const findAvailability = async (req, res, next) => {
         })
         // now everytime has a consultation array.
 
-
-
-        res.send({
-            doctorAndRoomTimes
-        });
+        res.send(R.flatten(doctorAndRoomTimes.map(RnD => RnD.finalTime)));
     } catch (err) {
         next(err);
     }
