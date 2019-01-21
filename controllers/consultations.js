@@ -3,39 +3,45 @@ const debug = require('debug')('timify:controllers:consultations')
 let m = require('moment');
 const { extendMoment } = require('moment-range');
 const mongoose = require('mongoose');
-const RK = mongoose.Types.ObjectId;
 const v = require('../services/index').validator;
 const R = require('ramda');
-
 const { TIME_FORMAT, DATE_FORMAT, DATE_TIME_FORMAT } = require('../services').constants;
+const RK = mongoose.Types.ObjectId;
+const moment = m.utc
 m = extendMoment(m);
-moment = m.utc
 
-
+/**
+ * @description It converts weekday of moment number into the number weekday index in our DB
+ * @param {Number} momentIndex 
+ * @returns {Number}
+ */
 const cvrtMoment2Index = (momentIndex) => (momentIndex) % 7;
-const findMiddleTime = (referenceTime, subjectTime) => {
-    // case 1: subject begin time is in interval of reference time
-    // case 2: subject end time is in interval of reference time
-    // case 3: subject time overlaps from outer bounds to reference time
-    // case 4: subject is limited to reference time
-    // case 5: subject time lies on reference time
-    // case 6: subject time never overlaps reference time
 
+/**
+ * 
+ * @param {Object} referenceTime 
+ * @param {Date} referenceTime.begin 
+ * @param {Date} referenceTime.end
+ * @param {Object} subjectTime 
+ * @param {Date} subjectTime.begin
+ * @param {Date} subjectTime.end
+ */
+const findMiddleTime = (referenceTime, subjectTime) => {
 
     if (!referenceTime || !subjectTime) {
-        debug('null case');
+        // debug('null case');
         return null;
     }
     // case 8
     if (moment(subjectTime.begin).isSameOrAfter(referenceTime.end) ||
         moment(subjectTime.end).isSameOrBefore(referenceTime.begin)) {
-        debug('case 8');
+        // debug('case 8');
         return null
     }
     // case 2 & case 1
     if (moment(referenceTime.begin).isSameOrBefore(subjectTime.begin) &&
         moment(referenceTime.end).isSameOrAfter(subjectTime.end)) {
-        debug('case 1 & 2')
+        // debug('case 1 & 2')
         return {
             begin: new Date(subjectTime.begin),
             end: new Date(subjectTime.end)
@@ -43,7 +49,7 @@ const findMiddleTime = (referenceTime, subjectTime) => {
     }
     // case 3 & 9
     if (moment(referenceTime.begin).isSame(subjectTime.begin)) {
-        debug('case 3 & 9')
+        // debug('case 3 & 9')
         return {
             begin: new Date(referenceTime.begin),
             end: (moment(referenceTime.end).isSameOrBefore(subjectTime.end)) ? new Date(referenceTime.end) : new Date(subjectTime.end)
@@ -51,7 +57,7 @@ const findMiddleTime = (referenceTime, subjectTime) => {
     }
     // case 4 and 10
     if (moment(referenceTime.end).isSame(subjectTime.end)) {
-        debug('case 4 & 10');
+        // debug('case 4 & 10');
         return {
             begin: (moment(referenceTime.begin).isAfter(subjectTime.begin)) ? new Date(referenceTime.begin) : new Date(subjectTime.begin),
             end: new Date(referenceTime.end),
@@ -60,7 +66,7 @@ const findMiddleTime = (referenceTime, subjectTime) => {
 
     // case 6
     if (moment(subjectTime.begin).isBetween(referenceTime.begin, referenceTime.end)) {
-        debug('case 6')
+        // debug('case 6')
         return {
             begin: new Date(subjectTime.begin),
             end: (moment(referenceTime.end).isSameOrBefore(subjectTime.end)) ? new Date(referenceTime.end) : new Date(subjectTime.end)
@@ -68,14 +74,71 @@ const findMiddleTime = (referenceTime, subjectTime) => {
     }
     // case 7
     if (moment(subjectTime.end).isBetween(referenceTime.begin, referenceTime.end)) {
-        debug('case 7')
+        // debug('case 7')
         return {
             begin: (moment(referenceTime.begin).isAfter(subjectTime.begin)) ? new Date(referenceTime.begin) : new Date(subjectTime.begin),
             end: new Date(subjectTime.end)
         }
     }
-    debug('no case');
+    // debug('no case');
     return null;
+}
+const timeSeparator = (time, consultations, durationInMins) => {
+    let timeRanges = [m.range(time.begin, time.end)];
+    consultations.forEach(con => {
+        timeRanges.forEach((t, i) => {
+            let ranges = t.subtract(m.range(con.begin, con.end));
+            if (ranges[0] !== null) {
+                timeRanges.splice(i, 1, ...ranges)
+            }
+        })
+    })
+    return timeRanges.reduce((prev, t) => {
+        if (moment(t.end).diff(t.start, 'minute') >= durationInMins) {
+            prev.push({
+                begin: t.start.utc().toDate(),
+                end: t.end.subtract(durationInMins, 'minute').utc().toDate()
+            });
+        }
+        return prev;
+    }, [])
+}
+
+const setAvailableTime = (docSet, mStartDate, mEndDate) => {
+    return docSet.map(doc => {
+        if (!doc.availableTimes) {
+            doc.availableTimes = [];
+        }
+        let docItrtvDate = mStartDate.clone();
+        // iterating over days to create exact same days for each day in interval
+        while (docItrtvDate <= mEndDate) {
+
+            let dayIndex = cvrtMoment2Index(docItrtvDate.weekday());
+
+            if (!doc.times[dayIndex]) {
+                doc.availableTimes.push(null);
+            } else {
+                let begin = moment(`${docItrtvDate.format(DATE_FORMAT)} ${doc.times[dayIndex].begin}`, DATE_TIME_FORMAT).toDate();
+                let end = moment(`${docItrtvDate.format(DATE_FORMAT)} ${doc.times[dayIndex].end}`, DATE_TIME_FORMAT).toDate();
+                if (mStartDate.isSameOrAfter(end)) {
+                    doc.availableTimes.push(null);
+                } else if (mEndDate.isSameOrBefore(end)) {
+                    doc.availableTimes.push(null);
+                } else if (mStartDate.isAfter(begin)) {
+                    begin = mStartDate.toDate();
+                } else if (mEndDate.isBefore(end)) {
+                    end = mEndDate.toDate();
+                } else {
+                    doc.availableTimes.push({
+                        begin,
+                        end
+                    })
+                }
+            }
+            docItrtvDate.add(1, 'day');
+        }
+        return doc;
+    });
 }
 const findAvailability = async (req, res, next) => {
     try {
@@ -85,7 +148,7 @@ const findAvailability = async (req, res, next) => {
             duration: v.numeric
         });
 
-        debug(req.query);
+        // debug(req.query);
         validator(req.query);
         let payload = req.query;
         payload.duration = parseInt(payload.duration)
@@ -95,7 +158,6 @@ const findAvailability = async (req, res, next) => {
             throw new Error('"begin" date must be earlier date than "end" date')
         }
         let weekDays = [];
-        // let daysCount = mEndDate.diff(mStartDate, 'days');
         for (let i = 0, iterativeDate = mStartDate.clone();
             i < 7 && iterativeDate < mEndDate;
             i++) {
@@ -125,46 +187,11 @@ const findAvailability = async (req, res, next) => {
         let availableDoctors = await Doctor.find(query);
         availableDoctors = availableDoctors.map(obj => obj.toObject())
         availableRooms = availableRooms.map(o => o.toObject());
-        let setAvailableTime = (docSet) => {
-            return docSet.map(doc => {
-                if (!doc.availableTimes) {
-                    doc.availableTimes = [];
-                }
-                let docItrtvDate = mStartDate.clone();
-                // iterating over days to create exact same days for each day in interval
-                while (docItrtvDate <= mEndDate) {
-
-                    let dayIndex = cvrtMoment2Index(docItrtvDate.weekday());
-
-                    if (!doc.times[dayIndex]) {
-                        doc.availableTimes.push(null);
-                    } else {
-                        let begin = moment(`${docItrtvDate.format(DATE_FORMAT)} ${doc.times[dayIndex].begin}`, DATE_TIME_FORMAT).toDate();
-                        let end = moment(`${docItrtvDate.format(DATE_FORMAT)} ${doc.times[dayIndex].end}`, DATE_TIME_FORMAT).toDate();
-                        if (mStartDate.isSameOrAfter(end)) {
-                            doc.availableTimes.push(null);
-                        } else if (mEndDate.isSameOrBefore(end)) {
-                            doc.availableTimes.push(null);
-                        } else if (mStartDate.isAfter(begin)) {
-                            begin = mStartDate.toDate();
-                        } else if (mEndDate.isBefore(end)) {
-                            end = mEndDate.toDate();
-                        } else {
-                            doc.availableTimes.push({
-                                begin,
-                                end
-                            })
-                        }
-                    }
-                    docItrtvDate.add(1, 'day');
-                }
-                return doc;
-            });
-        }
-        availableDoctors = setAvailableTime(availableDoctors);
-        availableRooms = setAvailableTime(availableRooms);
-        let doctorAndRoomTimes = availableRooms.reduce((prev, currentRoom) => {
-            return availableDoctors.map(doctor => {
+        
+        availableDoctors = setAvailableTime(availableDoctors, mStartDate, mEndDate);
+        availableRooms = setAvailableTime(availableRooms, mStartDate, mEndDate);
+        let doctorAndRoomTimes = availableRooms.reduce((prev,currentRoom) => {
+            return prev.concat(availableDoctors.reduce((prevDoctor ,doctor) => {
                 let DnR = {
                     room: currentRoom.id,
                     doctor: doctor.id,
@@ -178,16 +205,21 @@ const findAvailability = async (req, res, next) => {
                         }
                     });
                 });
-                return DnR;
-            })
-        }, [])
-
+                if (DnR.times.length) {
+                    return prevDoctor.concat(DnR);
+                }
+                return prevDoctor;
+            }, []))
+        }, []);
+        debug(doctorAndRoomTimes);
+        availableDoctors = null;
+        availableRooms = null;
         // once data is ready and has all available time listed for doctor and room.
         // check for consultations on that day and modify that day room accordingly.
-
-        doctorAndRoomTimes = await Promise.all(doctorAndRoomTimes.map(async (DnR) => {
+        console.time('DnRCalculation')
+        doctorAndRoomTimes = await Promise.all(doctorAndRoomTimes.map(async (DnR, i) => {
             let consultationQueries = [];
-            debug(DnR);
+            // debug(DnR);
             try {
                 DnR.times.forEach(time => {
                     consultationQueries.push({
@@ -237,47 +269,55 @@ const findAvailability = async (req, res, next) => {
                     })
                 })
             } catch (err) {
-                debug(err);
+                // debug(err);
             }
-
-            DnR.consulations = await Promise.all(consultationQueries.map(q => Consultation.find(q, 'begin end')))
+            console.log('promise' + i)
+            console.time('promise' + i);
+            // Here I have applied 3 different ways to populate data and found uncommented section to be most fast
+            // I am leaving other code too for the reference that it could be done this way too..
+            // DnR.consultations = await Promise.all(consultationQueries.map(q => Consultation.find(q, 'begin end')))
+            // /*
+            DnR.consultations = [];
+            for (let i = 0; i < consultationQueries.length; i++) {
+                const query = consultationQueries[i];
+                DnR.consultations.push(await Consultation.find(query, 'begin end'))
+            }
+            // */
+            /*
+            let tasks = consultationQueries.map(q => Consultation.find.bind(Consultation, q, 'begin end'));
+            let promise = Promise.resolve();
+            DnR.consultations = [];
+            tasks.forEach(task => {
+                promise = promise.then((consultations) => {
+                    if (consultations) {
+                        DnR.consultations.push(consultations);
+                    }
+                    return task();
+                });
+            });
+            DnR.consultations.push(await promise);
+            */
+            
+            console.timeEnd('promise'+ i);
             return DnR;
         }));
-        let timeSeparator = (time, consultations, durationInMins) => {
-            let timeRanges = [m.range(time.begin, time.end)];
-            consultations.forEach(con => {
-                timeRanges.forEach((t, i) => {
-                    let ranges = t.subtract(m.range(con.begin, con.end));
-                    if (ranges[0] !== null) {
-                        timeRanges.splice(i, 1, ...ranges)
-                    }
-                })
+        console.timeEnd('DnRCalculation')
 
-            })
-            return timeRanges.reduce((prev, t) => {
-                if (moment(t.end).diff(t.start, 'minute') >= durationInMins) {
-                    prev.push({
-                        begin: t.start.utc().toDate(),
-                        end: t.end.subtract(durationInMins, 'minute').utc().toDate()
-                    });
-                }
-                return prev;
-            }, [])
-
-        }
+        let finalTime = [];
+        
         doctorAndRoomTimes.forEach(DnR => {
-            DnR.finalTime = [];
+            //debug(DnR);
             DnR.times.forEach((avbTime, i) => {
-                DnR.finalTime.push(timeSeparator(avbTime, DnR.consulations[i], payload.duration));
+                finalTime.push(timeSeparator(avbTime, DnR.consultations[i], payload.duration));
             });
         })
         // now everytime has a consultation array.
 
         res.send({
             doctorAndRoomTimes,
-            availableDoctors,
-            availableRooms,
-            times: R.flatten(doctorAndRoomTimes.map(RnD => RnD.finalTime))
+            // availableDoctors,
+            // availableRooms,
+            times: R.flatten(finalTime)
         });
     } catch (err) {
         next(err);
