@@ -83,6 +83,17 @@ const findMiddleTime = (referenceTime, subjectTime) => {
     // debug('no case');
     return null;
 }
+
+/**
+ * 
+ * @param {Object} time 
+ * @param {Date} time.begin
+ * @param {Date} time.end
+ * @param {Object[]} consultations 
+ * @param {Date} consultations[].begin
+ * @param {Date} consultations[].end
+ * @param {Number} durationInMins 
+ */
 const timeSeparator = (time, consultations, durationInMins) => {
     let timeRanges = [m.range(time.begin, time.end)];
     consultations.forEach(con => {
@@ -104,6 +115,15 @@ const timeSeparator = (time, consultations, durationInMins) => {
     }, [])
 }
 
+/**
+ * 
+ * @param {Object[]} docSet 
+ * @param {Object[]} docSet[].times
+ * @param {Date} docSet[].times[].begin
+ * @param {Date} docSet[].times[].end
+ * @param {MomentObject} mStartDate 
+ * @param {MomentObject} mEndDate 
+ */
 const setAvailableTime = (docSet, mStartDate, mEndDate) => {
     return docSet.map(doc => {
         if (!doc.availableTimes) {
