@@ -160,6 +160,130 @@ const setAvailableTime = (docSet, mStartDate, mEndDate) => {
         return doc;
     });
 }
+
+const findAvailabilityWithQuery = async (req, res, next) => {
+    try {
+        let payload = req.query;
+        payload.duration = parseInt(payload.duration)
+        let mStartDate = moment(payload.begin, DATE_TIME_FORMAT)
+        let mEndDate = moment(payload.end, DATE_TIME_FORMAT)
+        let daysCount = Math.ceil(mEndDate.diff(mStartDate, 'days'));
+        if (mStartDate > mEndDate) {
+            throw new Error('"begin" date must be earlier date than "end" date')
+        }
+        let weekDays = [];
+        for (let i = 0, iterativeDate = mStartDate.clone();
+            i < 7 && iterativeDate < mEndDate;
+            i++) {
+            weekDays.push(cvrtMoment2Index(iterativeDate.weekday()))
+            iterativeDate.add(1, 'day');
+        }
+        if (weekDays.length < 7 && mEndDate.isAfter(mEndDate.clone().startOf('day'))) {
+            weekDays.push(cvrtMoment2Index(mEndDate.weekday()))
+        }
+        const arrayOfTermBuilder = (term, repeatCount) => {
+            let arrOfTerm = []
+            for (let index = 0; index < repeatCount; index++) {
+                arrOfTerm.push(term);
+            }
+            debug(arrOfTerm);
+            return arrOfTerm;
+        }
+        let concatTimes = {
+            $addFields: {
+                availableTimes: { $concatArrays: arrayOfTermBuilder('$times', Math.ceil(daysCount / 7)) }
+            }
+        }
+        let pipelineForDnR = [
+            {
+                $match: {
+                    $or: weekDays.map(wd => {
+                        let key = `times.${wd}`;
+                        let q = {};
+                        q[key] = { $ne: { $type: 10 } }
+                        return q;
+                    })
+                }
+            },
+            concatTimes,
+            {
+                $project:
+                {
+                    times: 0
+                }
+            },
+            {
+                $unwind: {
+                    path: "$availableTimes",
+                    includeArrayIndex: "timeIndex",
+                    preserveNullAndEmptyArrays: false
+                }
+            },
+            {
+                $match: {
+                    availableTimes: { $ne: null }
+                }
+            },
+            {
+                $addFields: {
+                    begin: { $toDate: { $concat: [mStartDate.format('YYYY-MM-DD '), "$availableTimes.begin"] } },
+                    end: { $toDate: { $concat: [mStartDate.format('YYYY-MM-DD '), "$availableTimes.end"] } }
+                }
+            },
+            {
+                $project: {
+                    id: 1,
+                    name: 1,
+                    begin: { $add: ["$begin", { $multiply: ['$timeIndex', 24, 60, 60000] }] },
+                    end: { $add: ["$end", { $multiply: ['$timeIndex', 24, 60, 60000] }] }
+                }
+            },
+            {
+                $match: {
+                    $or: [
+                        {
+                            end: { $gt: mStartDate.toDate() },
+                        },
+                        {
+                            begin: { $lt: mEndDate.toDate() },
+                        }
+                    ]
+                }
+            },
+            {
+                $project: {
+                    id: 1,
+                    name: 1,
+                    begin: {
+                        $cond: [
+                            { $lt: ["$begin", mStartDate.toDate()] },
+                            mStartDate.toDate(),
+                            "$begin"
+                        ]
+                    },
+                    end: {
+                        $cond: [
+                            { $gt: ["$end", mEndDate.toDate()] },
+                            mEndDate.toDate(),
+                            "$end"
+                        ]
+                    },
+                }
+            }
+        ]
+        let availableDoctors = await Doctor.aggregate(pipelineForDnR);
+        let availableRooms = await Room.aggregate(pipelineForDnR);
+
+        res.send({
+            availableDoctors,
+            availableRooms
+        })
+    } catch (err) {
+        next(err);
+
+    }
+}
+
 const findAvailability = async (req, res, next) => {
     try {
         const validator = v.object({
@@ -192,26 +316,26 @@ const findAvailability = async (req, res, next) => {
          To check null value
          { $type: 10 }
         */
-        let query = { $or: [] }
+        let query = {
+            $or: weekDays.map(wd => {
+                let key = `times.${wd}`;
+                let q = {};
+                q[key] = { $ne: { $type: 10 } }
+                return q;
+            })
+        }
         // all the weekdays found
         // now mapping it to query
         // by $or
-        query.$or = weekDays.map(wd => {
-            let key = `times.${wd}`;
-            let q = {};
-            q[key] = { $ne: { $type: 10 } }
-            return q;
-        })
-
         let availableRooms = await Room.find(query);
         let availableDoctors = await Doctor.find(query);
         availableDoctors = availableDoctors.map(obj => obj.toObject())
         availableRooms = availableRooms.map(o => o.toObject());
-        
+
         availableDoctors = setAvailableTime(availableDoctors, mStartDate, mEndDate);
         availableRooms = setAvailableTime(availableRooms, mStartDate, mEndDate);
-        let doctorAndRoomTimes = availableRooms.reduce((prev,currentRoom) => {
-            return prev.concat(availableDoctors.reduce((prevDoctor ,doctor) => {
+        let doctorAndRoomTimes = availableRooms.reduce((prev, currentRoom) => {
+            return prev.concat(availableDoctors.reduce((prevDoctor, doctor) => {
                 let DnR = {
                     room: currentRoom.id,
                     doctor: doctor.id,
@@ -317,14 +441,14 @@ const findAvailability = async (req, res, next) => {
             });
             DnR.consultations.push(await promise);
             */
-            
-            console.timeEnd('promise'+ i);
+
+            console.timeEnd('promise' + i);
             return DnR;
         }));
         console.timeEnd('DnRCalculation')
 
         let finalTime = [];
-        
+
         doctorAndRoomTimes.forEach(DnR => {
             //debug(DnR);
             DnR.times.forEach((avbTime, i) => {
@@ -372,6 +496,7 @@ const getAllConsultations = async (req, res, next) => {
 
 module.exports = {
     findAvailability,
+    findAvailabilityWithQuery,
     createConsultation,
     getAllConsultations
 }
