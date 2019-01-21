@@ -114,7 +114,17 @@ const timeSeparator = (time, consultations, durationInMins) => {
         return prev;
     }, [])
 }
-
+/**
+ * 
+ * @param {Object} time 
+ * @param {Date} time.begin
+ * @param {Date} time.end
+ * @param {Object[]} time.consultations 
+ * @param {Date} time.consultations[].begin
+ * @param {Date} time.consultations[].end
+ * @param {Number} durationInMins 
+ */
+const timeSeparatorForQuery = (timeRange, durationInMins) => { };
 /**
  * 
  * @param {Object[]} docSet 
@@ -194,7 +204,7 @@ const findAvailabilityWithQuery = async (req, res, next) => {
                 availableTimes: { $concatArrays: arrayOfTermBuilder('$times', Math.ceil(daysCount / 7)) }
             }
         }
-        let pipelineForDnR = [
+        let pipelineForDnR = (foreignField) => [
             {
                 $match: {
                     $or: weekDays.map(wd => {
@@ -269,10 +279,50 @@ const findAvailabilityWithQuery = async (req, res, next) => {
                         ]
                     },
                 }
+            },
+            {
+                $lookup:
+                {
+                    from: "consultations",
+                    localField: "id",
+                    foreignField: foreignField,
+                    as: "consultations"
+                }
+            },
+            {
+                $project: {
+                    name: 1,
+                    id: 1,
+                    begin: 1,
+                    end: 1,
+                    consultations: {
+                        $filter: {
+                            input: "$consultations",
+                            as: "consultation",
+                            cond: {
+                                $and: [
+                                    { $gte: ["$$consultation.begin", "$begin"] },
+                                    { $lte: ["$$consultation.end", "$end"] },
+                                ]
+                            }
+                        }
+                    }
+                }
+            },
+            {
+                $group: {
+                    _id: "$id",
+                    times: { "$push": { begin: "$begin", end: "$end", consultations: "$consultations" } }
+                },
             }
         ]
-        let availableDoctors = await Doctor.aggregate(pipelineForDnR);
-        let availableRooms = await Room.aggregate(pipelineForDnR);
+        let availableDoctors = await Doctor.aggregate(pipelineForDnR("doctorId"));
+        let availableRooms = await Room.aggregate(pipelineForDnR("roomId"));
+        availableDoctors.map(doctor => {
+            doctor.times.forEach(time => {
+                doctor.availableTimes = timeSeparator(time, time.consultations, payload.duration)
+            })
+        })
 
         res.send({
             availableDoctors,
