@@ -166,8 +166,8 @@ const findAvailability = async (req, res, next) => {
         let doctorAndRoomTimes = availableRooms.reduce((prev, currentRoom) => {
             return availableDoctors.map(doctor => {
                 let DnR = {
-                    room: currentRoom._id,
-                    doctor: doctor._id,
+                    room: currentRoom.id,
+                    doctor: doctor.id,
                     times: []
                 };
                 doctor.availableTimes.forEach(doctorTime => {
@@ -266,13 +266,19 @@ const findAvailability = async (req, res, next) => {
 
         }
         doctorAndRoomTimes.forEach(DnR => {
+            DnR.finalTime = [];
             DnR.times.forEach((avbTime, i) => {
-                DnR.finalTime = timeSeparator(avbTime, DnR.consulations[i], payload.duration);
+                DnR.finalTime.push(timeSeparator(avbTime, DnR.consulations[i], payload.duration));
             });
         })
         // now everytime has a consultation array.
 
-        res.send(R.flatten(doctorAndRoomTimes.map(RnD => RnD.finalTime)));
+        res.send({
+            doctorAndRoomTimes,
+            availableDoctors,
+            availableRooms,
+            times: R.flatten(doctorAndRoomTimes.map(RnD => RnD.finalTime))
+        });
     } catch (err) {
         next(err);
     }

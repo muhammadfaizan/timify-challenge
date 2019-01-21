@@ -9,14 +9,13 @@ const createAndUpdateResources = async (req, res, next) => {
         const bulk = model.collection.initializeUnorderedBulkOp();
 
         docs.forEach((doc) => {
-            doc._id = ObjectID(doc._id)
             bulk.insert(doc)
         });
         return bulk.execute();
     }
     try {
         let roomAndDoctorValidator = v.array(v.object({
-            _id: v.mongoId,
+            id: v.string,
             name: v.string,
             times: v.compose([
                 v.length(7),
