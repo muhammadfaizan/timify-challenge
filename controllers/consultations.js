@@ -116,17 +116,6 @@ const timeSeparator = (time, consultations, durationInMins) => {
 }
 /**
  * 
- * @param {Object} time 
- * @param {Date} time.begin
- * @param {Date} time.end
- * @param {Object[]} time.consultations 
- * @param {Date} time.consultations[].begin
- * @param {Date} time.consultations[].end
- * @param {Number} durationInMins 
- */
-const timeSeparatorForQuery = (timeRange, durationInMins) => { };
-/**
- * 
  * @param {Object[]} docSet 
  * @param {Object[]} docSet[].times
  * @param {Date} docSet[].times[].begin
@@ -386,27 +375,41 @@ const findAvailabilityWithQuery = async (req, res, next) => {
                     const roomTimeSpan = m.range(roomSpan.begin, roomSpan.end);
                     const doctorTimeSpan = m.range(doctorSpan.begin, doctorSpan.end);
                     const intersectionSpan = roomTimeSpan.intersect(doctorTimeSpan);
-                    if (intersectionSpan) {
-                        debug('overlaps: ', roomTimeSpan.overlaps(doctorTimeSpan));
-                        debug(intersectionSpan.start.utc());
-                        debug(intersectionSpan.end.utc());
-                        DnR.times.push({
-                            begin: intersectionSpan.start.toDate(),
-                            end: intersectionSpan.end.toDate()
-                        })
+                    if (!intersectionSpan) {
+                        continue;
                     }
+                    let timeRanges = [intersectionSpan];
+                    doctorSpan.consultations.forEach(con => {
+                        timeRanges.forEach((t, i) => {
+                            let ranges = t.subtract(m.range(con.begin, con.end));
+                            if (ranges[0] !== null) {
+                                ranges = ranges.filter(range => range.diff('minutes') >= payload.duration)
+                                timeRanges.splice(i, 1, ...ranges)
+                            }
+                        })
+                    })
+                    roomSpan.consultations.forEach(con => {
+                        timeRanges.forEach((t, i) => {
+                            let ranges = t.subtract(m.range(con.begin, con.end));
+                            if (ranges[0] !== null) {
+                                ranges = ranges.filter(range => range.diff('minutes') >= payload.duration)
+                                timeRanges.splice(i, 1, ...ranges)
+                            }
+                        })
+                    })
+                    DnR.times = timeRanges.map(({start,end}) => Object.assign({begin: start, end}))
+                    availableDnR = availableDnR.concat(DnR.times.map(t => {
+                        return {
+                            begin: t.begin,
+                            end: moment(t.end).subtract(payload.duration, 'minutes')
+                        }
+                    }))
                     
                 }
-                availableDnR.push(DnR);
-                // doctor.availableTimes = timeSeparator(time, time.consultations, payload.duration)
             })
         })
 
-        res.send({
-            availableDoctors,
-            availableRooms,
-            availableDnR
-        })
+        res.send(R.uniq(availableDnR))
     } catch (err) {
         next(err);
 
