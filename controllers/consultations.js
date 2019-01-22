@@ -389,6 +389,9 @@ const findAvailabilityWithQuery = async (req, res, next) => {
                         })
                     })
                     roomSpan.consultations.forEach(con => {
+                        if (con.doctorId === DnR.doctor) {
+                            return;
+                        }
                         timeRanges.forEach((t, i) => {
                             let ranges = t.subtract(m.range(con.begin, con.end));
                             if (ranges[0] !== null) {
