@@ -196,7 +196,6 @@ const findAvailabilityWithQuery = async (req, res, next) => {
             for (let index = 0; index < repeatCount; index++) {
                 arrOfTerm.push(term);
             }
-            debug(arrOfTerm);
             return arrOfTerm;
         }
         let concatTimes = {
@@ -234,23 +233,44 @@ const findAvailabilityWithQuery = async (req, res, next) => {
                     availableTimes: { $ne: null }
                 }
             },
+            /* not available in mongod v3.6
             {
                 $addFields: {
                     begin: { $toDate: { $concat: [mStartDate.format('YYYY-MM-DD '), "$availableTimes.begin"] } },
                     end: { $toDate: { $concat: [mStartDate.format('YYYY-MM-DD '), "$availableTimes.end"] } }
                 }
             },
+            */
+            {
+                $addFields: {
+                    begin: { 
+                        $dateFromString: {
+                            dateString: { 
+                                $concat: [mStartDate.format('YYYY-MM-DD '), "$availableTimes.begin"] 
+                            }
+                        } 
+                    },
+                    end: { 
+                        $dateFromString: {
+                            dateString: { 
+                                $concat: [mStartDate.format('YYYY-MM-DD '), "$availableTimes.end"] 
+                            }
+                        } 
+                    }
+                }
+            },
             {
                 $project: {
                     id: 1,
                     name: 1,
+                    timeIndex: 1,
                     begin: { $add: ["$begin", { $multiply: ['$timeIndex', 24, 60, 60000] }] },
                     end: { $add: ["$end", { $multiply: ['$timeIndex', 24, 60, 60000] }] }
                 }
             },
             {
                 $match: {
-                    $or: [
+                    $and: [
                         {
                             end: { $gt: mStartDate.toDate() },
                         },
@@ -264,6 +284,7 @@ const findAvailabilityWithQuery = async (req, res, next) => {
                 $project: {
                     id: 1,
                     name: 1,
+                    timeIndex: 1,
                     begin: {
                         $cond: [
                             { $lt: ["$begin", mStartDate.toDate()] },
@@ -294,6 +315,7 @@ const findAvailabilityWithQuery = async (req, res, next) => {
                     name: 1,
                     id: 1,
                     begin: 1,
+                    timeIndex: 1,
                     end: 1,
                     consultations: {
                         $filter: {
@@ -312,21 +334,78 @@ const findAvailabilityWithQuery = async (req, res, next) => {
             {
                 $group: {
                     _id: "$id",
-                    times: { "$push": { begin: "$begin", end: "$end", consultations: "$consultations" } }
+                    times: { "$push": { begin: "$begin", end: "$end", dayIndex:'$timeIndex', consultations: "$consultations" } }
+                },
+            },
+            {
+                $project: {
+                    _id: 1,
+                    times: 1,
+                    timesObj: { 
+                        $map:
+                            {
+                                input: "$times",
+                                as: "time",
+                                in: [{
+                                    $substr: [ "$$time.dayIndex", 0, 2 ],
+                                },
+                                {
+                                    "begin": "$$time.begin",
+                                    "end": "$$time.end",
+                                    "consultations": "$$time.consultations"
+                                }]
+                            }
+                    }
+                },
+            },
+            {
+                $project: {
+                    _id: 1,
+                    times: { 
+                        $arrayToObject: "$timesObj"
+                    }
                 },
             }
         ]
         let availableDoctors = await Doctor.aggregate(pipelineForDnR("doctorId"));
         let availableRooms = await Room.aggregate(pipelineForDnR("roomId"));
-        availableDoctors.map(doctor => {
-            doctor.times.forEach(time => {
-                doctor.availableTimes = timeSeparator(time, time.consultations, payload.duration)
+        let availableDnR = [];
+        availableDoctors.forEach(doctor => {
+            availableRooms.forEach(room => {
+                let DnR = {
+                    room: room._id,
+                    doctor: doctor._id,
+                    times: []
+                };
+                for (let index = 0; index < daysCount; index++) {
+                    let doctorSpan = doctor.times[index];
+                    let roomSpan = room.times[index];
+                    if (!doctorSpan || !roomSpan ) {
+                        continue;
+                    }
+                    const roomTimeSpan = m.range(roomSpan.begin, roomSpan.end);
+                    const doctorTimeSpan = m.range(doctorSpan.begin, doctorSpan.end);
+                    const intersectionSpan = roomTimeSpan.intersect(doctorTimeSpan);
+                    if (intersectionSpan) {
+                        debug('overlaps: ', roomTimeSpan.overlaps(doctorTimeSpan));
+                        debug(intersectionSpan.start.utc());
+                        debug(intersectionSpan.end.utc());
+                        DnR.times.push({
+                            begin: intersectionSpan.start.toDate(),
+                            end: intersectionSpan.end.toDate()
+                        })
+                    }
+                    
+                }
+                availableDnR.push(DnR);
+                // doctor.availableTimes = timeSeparator(time, time.consultations, payload.duration)
             })
         })
 
         res.send({
             availableDoctors,
-            availableRooms
+            availableRooms,
+            availableDnR
         })
     } catch (err) {
         next(err);
